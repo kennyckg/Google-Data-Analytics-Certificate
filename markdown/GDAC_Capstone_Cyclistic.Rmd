@@ -1,0 +1,761 @@
+---
+title: "GDAC_Capstone_Cyclistic"
+author: "Kenny Chiang Kai Kuang"
+date: "9/9/2021"
+knit: (function(input_file, encoding) {
+  out_dir <- 'docs';
+  rmarkdown::render(input_file,
+ encoding=encoding,
+ output_file=file.path(dirname(input_file), out_dir, 'GDAC-Capstone_Cyclistic.html'))})
+output: 
+  html_document:
+    toc: true
+    toc_depth: 4
+    theme: united
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Case Study: How does a bike-share navigate speedy success?
+
+### Background
+
+**Cyclistic** is a bike-share program that features more than 5,800 bicycles and 600 docking stations. Cyclistic users are more likely to ride for leisure, but about 30% use them to commute to work each day. Cyclistic offers 3 pricing plans: single-ride passes, full-day passes, and annual memberships. Customers who purchase single-ride or full-day passes are referred to as **casual** riders, while customers who purchase annual memberships are Cyclistic **members**.
+
+Cyclistic’s finance analysts have concluded that annual members are much more profitable than casual riders. The Director or Marketing (Lily Moreno) believes that maximizing the number of annual members will be key to future growth.
+
+**Goal:** Design marketing strategies aimed at converting casual riders into annual members. In order to do that, the analytical objectives below must be met:
+
+**Analytical Objectives:**
+
+1. How do annual members and casual riders use Cyclistic bikes differently?
+2. Why would casual riders buy Cyclistic annual memberships?
+3. How can Cyclistic use digital media to influence casual riders to become members?
+
+**Data Source(s):**
+
+As per the case study guidelines, we will be using the publicly available dataset from Divvy, a bike-share company based in Chicago. The [data](https://www.divvybikes.com/system-data) is made available by Motivate International Inc. under this [license](https://www.divvybikes.com/data-license-agreement).
+
+
+### Importing Libraries
+
+```{r libraries, message = FALSE, warning = FALSE}
+library(tidyverse) #helps wrangle data
+library(dplyr) #helps manipulate data
+library(lubridate) #helps wrangle date attributes
+library(ggplot2) #helps visualize data
+library(gdata) #for the duplicated2 function
+library(janitor)
+library(here)
+```
+
+### Importing data
+
+```{r importing_data, message = FALSE}
+d08_2021 <- read_csv(here("data","202108-divvy-tripdata.csv"))
+d07_2021 <- read_csv(here("data","202107-divvy-tripdata.csv"))
+d06_2021 <- read_csv(here("data","202106-divvy-tripdata.csv"))
+d05_2021 <- read_csv(here("data","202105-divvy-tripdata.csv"))
+d04_2021 <- read_csv(here("data","202104-divvy-tripdata.csv"))
+d03_2021 <- read_csv(here("data","202103-divvy-tripdata.csv"))
+d02_2021 <- read_csv(here("data","202102-divvy-tripdata.csv"))
+d01_2021 <- read_csv(here("data","202101-divvy-tripdata.csv"))
+d12_2020 <- read_csv(here("data","202012-divvy-tripdata.csv"))
+d11_2020 <- read_csv(here("data","202011-divvy-tripdata.csv"))
+d10_2020 <- read_csv(here("data","202010-divvy-tripdata.csv"))
+d09_2020 <- read_csv(here("data","202009-divvy-tripdata.csv"))
+```
+
+### Data Cleaning & Preparation
+
+```{r compare_columns}
+#comparing column names and data types
+compare_df_cols(d08_2021,d07_2021,d06_2021,d05_2021,d04_2021,d03_2021,
+                d02_2021,d01_2021,d12_2020,d11_2020,d10_2020,d09_2020)
+```
+
+As observed from the output above, we need to **convert the datatype for 'end_station_id' and 'start_station_id' for `d11_2020, d10_2020 and d09_2020' from numeric to character** so that they can stack properly in a combined dataframe.
+
+```{r convert_datatype}
+#convert datatype to character to build a single dataframe
+d09_2020 <- mutate(d09_2020, 
+                   start_station_id = as.character(start_station_id),
+                   end_station_id = as.character(end_station_id))
+d10_2020 <- mutate(d10_2020, 
+                   start_station_id = as.character(start_station_id),
+                   end_station_id = as.character(end_station_id))
+d11_2020 <- mutate(d11_2020,
+                   start_station_id = as.character(start_station_id),
+                   end_station_id = as.character(end_station_id))
+```
+
+As the column names and datatypes are now consistent across the dataset for the last 12-months, we can proceed to combine the data into a single dataframe for further analysis.
+
+```{r combine dataframes}
+#combining the data for the last 12 months into one dataframe
+df <- bind_rows(d08_2021,d07_2021,d06_2021,d05_2021,d04_2021,d03_2021,
+                d02_2021,d01_2021,d12_2020,d11_2020,d10_2020,d09_2020)
+```
+
+Taking a preview of the data:
+
+```{r head}
+head(df)
+```
+```{r glimpse}
+glimpse(df)
+```
+
+The combined dataset has **4,913,072 rows and 13 columns**.
+
+#### Check for duplicates
+
+```{r duplicate_check, eval = FALSE}
+sum(duplicated(df))
+```
+
+**No duplicate entries were found** in the combined dataframe. In the event there were duplicates, we can redefine "df" with the code below to remove any duplicates:
+
+```{r remove_duplicates, eval = FALSE}
+df <- df[!duplicated(df), ]
+```
+
+#### Check for missing values
+
+```{r missing check}
+sum(is.na(df))
+```
+
+Observe **1,893,786 missing values** in the combined dataset. 
+
+To further investigate where these missing values are present, we run the code below:
+
+```{r missing cols}
+#percent missing values per variable
+apply(df, 2, function(col)sum(is.na(col))/length(col))
+```
+
+We observe that there are **missing values** in **'start_station_name', 'start_station_id', 'end_station_name', 'end_station_id', 'end_lat' and 'end_lng'**. 
+
+We will attempt to fill the missing values in **'start_station_name' and 'end_station_name'** - we can ignore the rest as we will drop them from the dataframe and not be used for analysis.
+
+
+#### Investigating missing values in 'start_station_name' and 'end_station_name'
+
+Given that there are no latitude/longitude values missing for the starting point, we should be able to fill the missing values for 'start_station_name'. However, there are missing latitude/longitude values for the ending point which might cause issues when trying to fill. We will observe the impact later.
+
+To start, we first create a latitude/longitude column in the dataframe to get unique combinations to 'start_station_name' with their respective latitude/longitude and the same for 'end_station_name':
+
+```{r create_latlng}
+df$start_latlng <- paste(df$start_lat, df$start_lng, sep = "/")
+df$end_latlng <- paste(df$end_lat, df$end_lng, sep = "/")
+```
+
+We get the unique combinations for 'start_station_name' below:
+
+```{r unique_combinations}
+#for starting point
+unique_start <- unique(df[c("start_station_name", "start_latlng")])
+#drop missing values
+unique_start <- unique_start[!is.na(unique_start$start_station_name),]
+
+#for ending point
+unique_end <- unique(df[c("end_station_name", "end_latlng")])
+#drop missing values
+unique_end <- unique_end[!is.na(unique_end$end_station_name),]
+```
+
+Next, we will proceed to fill-in the missing values from the unique combinations:
+
+```{r replace_na}
+#for starting point
+#find the index of missing start_station_name in dataframe
+missing_ssn <- which(is.na(df$start_station_name))
+corresponding_slatlng <- df$start_latlng[missing_ssn]
+
+#replace the missing start_station_name with unique combination
+df$start_station_name[missing_ssn] <- unique_start$start_station_name[match(corresponding_slatlng, unique_start$start_latlng)]
+
+#for ending point
+#find the index of missing end_station_name in dataframe
+missing_esn <- which(is.na(df$end_station_name))
+corresponding_elatlng <- df$end_latlng[missing_esn]
+
+#replace the missing start_station_name with unique combination
+df$end_station_name[missing_esn] <- unique_end$end_station_name[match(corresponding_elatlng, unique_end$end_latlng)]
+```
+
+We re-run the code below to observe the missing values % in each column:
+
+```{r}
+#percent missing values per variable
+apply(df, 2, function(col)sum(is.na(col))/length(col))
+```
+
+Using this method, we **managed to fill ~ 1% of the missing values in both start_station_name and end_station_name**. We also checked whether there were instances where start_ or end_station_id is present but start_ or end_station_name is missing - there are 0 instances.
+
+Another method explored was downloading the most current list of stations (source below) and cross-checking with our dataframe to attempt to fill the missing values:
+
+***
+
+Source: https://data.cityofchicago.org/Transportation/Divvy-Bicycle-Stations-All-Map/bk89-9dk7
+
+```{r import_stations, message = FALSE, warning = FALSE}
+stations <- read_csv(here("data","Divvy_Bicycle_Stations.csv"))
+```
+A preview of the list of stations imported:
+
+```{r head_stations}
+head(stations)
+```
+```{r replace_na_external}
+#create lat/lng column with similar format to match
+#we round to 2 d.p. to match our dataframe's precision
+stations$latlng <- paste(
+  formatC(stations$Latitude, digits = 2, format = "f"),
+  formatC(stations$Longitude, digits = 2, format = "f"),
+  sep = "/")
+
+#for starting point
+#find the index of missing start_station_name in dataframe
+missing_ssn <- which(is.na(df$start_station_name))
+corresponding_slatlng <- df$start_latlng[missing_ssn]
+
+#replace the missing start_station_name with external database of names
+df$start_station_name[missing_ssn] <- stations$"Station Name"[match(corresponding_slatlng, stations$latlng)]
+
+#for ending point
+#find the index of missing end_station_name in dataframe
+missing_esn <- which(is.na(df$end_station_name))
+corresponding_elatlng <- df$end_latlng[missing_esn]
+
+#replace the missing start_station_name with external database of names
+df$end_station_name[missing_esn] <- stations$"Station Name"[match(corresponding_elatlng, stations$latlng)]
+```
+
+We re-run the missing values % check again:
+
+```{r}
+#percent missing values per variable
+apply(df, 2, function(col)sum(is.na(col))/length(col))
+```
+
+We **further reduced the missing values in start_ and end_station_name to 3% for both** - this is an acceptable range to consider dropping the missing values. However, since the objective is not towards machine learning application, we will keep the 3% of data as the other columns provide useful information.
+
+***
+
+#### Dropping not useful columns from the dataframe
+As we will not be using the lattitude and longitude data, we will drop it from the dataframe. We also drop 'start_station_id' and 'end_station_id' as we will be looking at station names instead. Lastly, we will also drop 'ride_id' as it is a unique identifier as we will group the data by time (days, months, years).
+
+We will also drop the dataframe: "stations" as we will no longer require it and dropping it will help free up memory.
+
+```{r drop_cols}
+df = select(df, -c(start_lat, start_lng, end_lat, end_lng, start_latlng, end_latlng, start_station_id, end_station_id, ride_id))
+
+#dropping station dataframe
+remove(stations)
+```
+
+### Feature Engineering
+#### Creating columns for month, day and year
+
+```{r dates}
+df$date <- as.Date(df$started_at)
+df$year <- format(as.Date(df$date), "%Y")
+df$month <- format(as.Date(df$date), "%m")
+df$day <- format(as.Date(df$date), "%d")
+df$day_of_week <- format(as.Date(df$date), "%A")
+#to set the order for 'day_of_week'
+df$day_of_week <- ordered(df$day_of_week, 
+                          levels = c("Monday", "Tuesday", "Wednesday",
+                                     "Thursday", "Friday", "Saturday",
+                                     "Sunday"))
+```
+
+#### Creating column for ride_length
+
+```{r ride_length}
+df$ride_length_secs <- difftime(df$ended_at, df$started_at)
+df$ride_length_secs <- as.numeric(df$ride_length_secs) #we cast 'ride_length' to numeric for calculations
+df$ride_length_days <- round(df$ride_length_secs / 86400, 2)
+df$ride_length_mins <- round(df$ride_length_secs / 60, 2)
+df$ride_length_hours <- round(df$ride_length_secs / 3600, 2)
+```
+
+### Exploratory Data Analysis (EDA)
+We begin the EDA process by taking a glimpse at the dataframe with new features. We want to ensure that they are in the correct datatype.
+
+```{r glimpse_new}
+glimpse(df)
+```
+To get a better sense of the data, we investigate the unique values for each column:
+
+```{r unique_vals}
+sapply(df, function(x) length(unique(x)))
+```
+
+From the above, we can see that **'rideable_type' and 'member_casual' are potential categorical variables of interest. 'start_station_name' and 'end_station_name' could also be interesting** if we were trying to understand which are the more popular stations for riders, but with >750 unique stations, it will be ideal if we can aggregate the data (regions, if available) to derive insights.
+
+**This also serves as a sanity-check:**
+
+- There are "365" unique dates in the dataset,
+- There are "2" unique years, 2020 and 2021,
+- There are "12" unique months,
+- There are "31" unique days, and
+- There are "7" unique days of the week
+
+as expected since we are looking at data for the past 12-months.
+
+#### EDA: Ride Length
+Let us first investigate the target variable (Ride Length) to better understand the duration the bicycles are rented for.
+
+```{r summary_ride_length_secs}
+summary(df$ride_length_secs)
+```
+
+From the above summary, we notice that **there are irregularities with ride_length < 0**. We can visualize the distribution better with a simple boxplot below:
+
+```{r boxplot_ride_length}
+ggplot(data = df) + 
+  geom_boxplot(mapping = aes(x = ride_length_secs)) + 
+  labs(title = "Boxplot of Ride Length (secs)")
+```
+```{r no_negative_RL}
+sum(df$ride_length_secs < 0)
+```
+```{r RL_<60}
+sum(df$ride_length_secs < 60)
+```
+
+**There are 5400 observations with 'ride_length_secs' < 0, which we will remove from the dataset.**
+
+Additionally, following the guidelines from the owners of the dataset (see link below), we will also **remove trips that were < 60 secs** (80,515 observations, incl. the 5400 negative values) to account for false starts or users trying to re-dock a bike.
+
+***
+
+Source: https://www.divvybikes.com/system-data
+
+```{r remove_lessthan60}
+df <- df[!(df$ride_length_secs < 60),]
+summary(df$ride_length_secs)
+```
+```{r summary_ride_lenth_mins}
+summary(df$ride_length_mins)
+```
+
+After removing ride_length < 60 secs, we observed the following:
+
+- Inter-quartile range (1Q-3Q) for ride_length is between 445-1424 secs (or 7.42-23.55 mins) with mean of 1413 secs (23.73 mins) and median of 782 secs (13.03 mins)
+- The distribution still looks skewed to the right - there are some very long ride_lengths with max of 3,356,649 secs (55,944.15 mins or 38.85 days) _(this can be seen in the boxplot below)_
+
+As the objective of this project is to understand the difference in usage between members and casual riders of Cyclistic, we will keep the outliers and investigate further. If the objective was towards machine learning application, then we should consider treatment of these outliers (1.5xIQR).
+
+```{r boxplot_ride_length_positive}
+ggplot(data = df) + 
+  geom_boxplot(mapping = aes(x = ride_length_secs)) + 
+  labs(title = "Boxplot of Ride Length (secs)", 
+       subtitle = "with < 60 secs (incl. negative) values removed")
+```
+
+As we want to understand the difference between members and casual riders, we group the dataset as such in the code below and print the median ride_length for each group:
+
+***
+
+_Note: as it is easier to interpret minutes than seconds, we will analyze ride_length in minutes going forward_
+
+```{r group_membercasual}
+df %>%
+  group_by(member_casual) %>%
+  summarise(median_duration_mins = median(ride_length_mins),
+            number_of_rides = n()) %>%
+  mutate(percentage = 
+           round(number_of_rides / sum(number_of_rides) * 100, 2))
+```
+
+From the table we above, we observe that in the last 12-months:
+
+- 45% of rides are attributed to Casual riders with a median ride_length of 17.42 mins, and
+- 55% of rides are attributed to Member riders with a median ride_length of 10.42 mins
+
+***
+
+_We use median as opposed to mean as the distribution is right skewed, which can been seen in the boxplot earlier_
+
+***
+
+#### EDA: Ride Length, by rideable_type
+We can further group the data by rideable_type to explore if there are preferences among Member and Casual riders towards the type of bicycle they hire:
+
+```{r group_membercasual_rideable}
+df %>%
+  group_by(member_casual, rideable_type) %>%
+  summarise(median_duration_mins = median(ride_length_mins),
+            number_of_rides = n(), .groups = "drop_last") %>%
+  mutate(
+    percentage = round(number_of_rides / sum(number_of_rides) * 100, 2))
+```
+
+From the table we above, we observe that in the last 12-months:
+
+- there is a preference for classic_bikes for both Casual (41%) and Member (51%) riders with a median ride_length of 16.88 mins and 10.60mins respectively, followed by
+- electric_bikes for Casual (34%) and Member (31%) riders with a median ride_length of 14.33 mins and 9.83 mins respectively, and lastly
+- docked_bikes for Casual (25%) and Member (17%) riders with a median ride_length of 24.70 mins and 10.93 mins respectively
+
+We can also visualize the above analysis with a jitterplot:
+
+```{r jitter_rl_membercasual}
+ggplot(data = df) + 
+  geom_jitter(
+    mapping = aes(x = member_casual, y = ride_length_mins,
+                  color = rideable_type, shape = rideable_type)) +
+  geom_hline(aes(yintercept = 13), col = "red", size = 1) +
+  labs(title = "Ride Length (mins), by member_casual")
+```
+
+From the above plot, we observe that:
+
+- docked_bikes tend to have the longest ride_length
+- electric_bikes tend to have the shortest ride_length
+- casual riders tend to have a longer ride_length vs. member riders
+- ride_length is centered around (most observations) the median = 13 mins (red line) around the bottom of the bars; there are several long ride_lengths attributed to docked_bikes that skew the distribution upwards
+
+We can better see this if we plot ride_length by rideable_type in the jitterplot below, where we observe significant variability in docked_bikes:
+
+```{r jitter_rl_rideable}
+ggplot(data = df) + 
+  geom_jitter(mapping = aes(x = rideable_type, y = ride_length_secs)) + 
+  labs(title = "Ride Length (mins), by rideable_type")
+```
+```{r rideable_type_member_casual}
+ggplot(data = df, aes(x = rideable_type, group = member_casual)) + 
+  geom_bar(
+    aes(y = ..prop.., fill = factor(..x..)), 
+    stat = "count") +
+  geom_text(
+    aes(label = scales::percent(..prop.., accuracy = 0.1), y = ..prop..),
+    stat = "count", vjust = -0.5) +
+  labs(
+    title = "Distribution of rideable_type, by member_casual",
+    y = "Percent", 
+    fill = "Rideable Type") +
+  facet_grid(~member_casual) + 
+  #setting y-limit to avoid cutting-off the label
+  scale_y_continuous(labels = scales::percent, limits = c(0, 0.6)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+```
+
+As the distribution by rideable_type among Casual and Member riders are quite similar, we might be interested to determine if there is dependence between the type of rider (member, casual) and rideable_type(classic, docked, electric); i.e. is the distribution of one variable affected by the presence of the other. 
+
+To determine this, we run a simple chi2 test with a 95% significance level below where:
+
+H0: Type of Rider and rideable_type are independent
+
+H1: Type of Rider and rideable_type are dependent
+
+```{r chi2}
+contingency_table <- table(df$member_casual, df$rideable_type)
+chisq.test(contingency_table)
+```
+
+Since the p-value < alpha = 0.05, we reject the H0 hypothesis which implies that the type of rider and rideable_type are dependent.
+
+***
+
+#### EDA: Ride Length, by days_of_week
+We will proceed with the EDA to observe any meaningful differences in ride_length between Casual and Member riders by the days of the week.
+
+```{r group_membercasual_daysofweek}
+df_dow <- df %>%
+  group_by(member_casual, day_of_week) %>%
+  summarise(median_duration_mins = median(ride_length_mins),
+            #we "drop_last" to set the base of percentage as member_casual
+            number_of_rides = n(), .groups = "drop_last") %>%
+  mutate(percentage = paste0(round(number_of_rides / sum(number_of_rides) * 100, 0),"%"))
+df_dow
+```
+
+We can also visualize the above information in the plots below:
+
+```{r plot_membercasual_daysofweek}
+df_dow %>%
+  ggplot(aes(x = day_of_week, y = number_of_rides, fill = member_casual)) + geom_col(position = "dodge") +
+  geom_text(
+    aes(label = percentage), 
+    position = position_dodge(width = 0.9), 
+    vjust = -0.5, size = 3) +
+  labs(
+    title = "Number of Rides, by Day of the Week",
+    subtitle = "with % of rides in week",
+    fill = "Rider Type") +
+  ylim(0, 600000) +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 0.5),
+    legend.position = "bottom")
+``` 
+```{r plot_rl_daysofweek}
+df_dow %>%
+  ggplot(aes(x = day_of_week, y = median_duration_mins, group = member_casual)) + 
+  geom_line(aes(color = member_casual), size = 1) + 
+  geom_point(aes(color = member_casual), size = 2) +
+  geom_label(
+    aes(label = sprintf("%4.1f", median_duration_mins)),
+    nudge_y = 1, size = 3) +
+  labs(title = "Median Ride Length, by Day of the Week") + 
+  theme(legend.position = "top")
+``` 
+
+From the above plots, we observe that in the last 12-months:
+
+- Ridership for Casual riders tend to be higher towards the end of the week (Fridays, Saturdays and Sundays), while ridership for Member riders are consistent across the week
+- Ride lengths for Casual riders are consistently higher than Member riders across the week (also observed from the earlier jitterplot of ride length)
+- Ride lengths are higher during the weekend for both Casual (avg. median duration of 19.8 mins vs. weekday 16.0 mins) and Member riders (11.7 mins vs. 10.0 mins)
+
+***
+
+#### EDA: Ride Length, by day_of_week, by rideable_type
+We can combine our analysis by day_of_week with rideable_type to uncover further insights into the preferences among Member and Casual riders. As a refresher, we observed that:
+
+- there is a preference for classic_bikes for both Casual (41%) and Member (51%) riders with a median ride_length of 16.88 mins and 10.60mins respectively, followed by
+- electric_bikes for Casual (34%) and Member (31%) riders with a median ride_length of 14.33 mins and 9.83 mins respectively, and lastly
+- docked_bikes for Casual (25%) and Member (17%) riders with a median ride_length of 24.70 mins and 10.93 mins respectively
+
+In the code below, we add another layer of grouping to the dataframe: rideable_type
+
+```{r group_membercasual_rideabletype_daysofweek_}
+df_dow2 <- df %>%
+  group_by(member_casual, rideable_type, day_of_week) %>%
+  summarise(median_duration_mins = median(ride_length_mins),
+            number_of_rides = n(), .groups = "drop_last") %>%
+  mutate(percentage = paste0(round(number_of_rides / sum(number_of_rides) * 100, 0),"%"))
+df_dow2
+```
+Simiarly, we can visualize the above analysis with the charts below:
+```{r plot_membercasual_rideabletype_daysofweek}
+df_dow2 %>%
+  ggplot(aes(x = day_of_week, y = number_of_rides, fill = member_casual)) + geom_col(position = "dodge") +
+  geom_text(
+    aes(label = percentage),
+    position = position_dodge(width = 0.9),
+    vjust = -0.5, size = 3) +
+  facet_grid(rows = vars(rideable_type)) +
+  labs(
+    title = "Number of Rides, by Day of the Week",
+    subtitle = "with % of rides in week",
+    fill = "Rider Type") +
+  ylim(0, 250000) +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 0.5),
+    legend.position = "right")
+```
+```{r plot_rl_rideabletype_daysofweek}
+df_dow2 %>%
+  ggplot(aes(x = day_of_week, y = median_duration_mins, group = member_casual)) + 
+  geom_line(aes(color = member_casual), size = 1) + 
+  geom_point(aes(color = member_casual), size = 2) +
+  geom_label(
+    aes(label = sprintf("%4.1f", median_duration_mins)),
+    nudge_y = 2, size = 3) +
+  facet_grid(rows = vars(rideable_type)) +
+  labs(title = "Median Ride Length, by Day of the Week") + 
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 0.5),
+    legend.position = "right")
+```
+
+From the above plots, we observe that in the last 12-months:
+
+- Ridership for Casual riders tend to be higher during weekend (Saturdays and Sundays) for **classic and docked bikes**, but note less variability for **electric bikes**
+- Confirming our earlier analysis, ridership for Member riders is consistent across the week regardless of rideable type
+
+For ride length:
+
+- Ride lengths for Casual riders are consistently higher than Member riders across the week, regardless of rideable type
+- Ride lengths are higher during the weekend for both Casual and Member riders, regardless of rideable type
+- Ride lengths are the longest for docked bikes, followed by classic then electric bikes
+
+***
+
+#### EDA: Ride Length, by Station
+Next, we will explore the data by station, both start and end, to observe if there are any meaningful differences between Casual and Member riders and where they hire and dock their bikes.
+
+However, as mentioned earlier, it would be ideal if we aggregate the data given that there are >750 unique values. For the purposes of this project, we will leave it non-aggregated and focus on the top 5-10 stations. We will also remove the 3% missing values in start_ and end_station_name.
+
+In the code below, we group the data by start_station_name to identify the most popular station among riders:
+
+```{r start_station}
+df_start <- df %>%
+  filter(!is.na(start_station_name)) %>%  #filter out missing values
+  group_by(member_casual, start_station_name) %>%
+  summarise(median_duration_mins = median(ride_length_mins),
+            number_of_rides = n(), .groups = "drop_last") %>%
+  mutate(percentage = paste0(round(number_of_rides / sum(number_of_rides) * 100, 2),"%")) %>%
+  arrange(member_casual, desc(number_of_rides)) %>%
+  slice_max(order_by = number_of_rides, n = 10) #get top 10
+df_start #print results
+```
+We can visualize the above with a bar chart below:
+
+```{r mc_startstation_bar}
+df_start %>%
+  ggplot(
+    aes(
+      x = reorder(start_station_name, number_of_rides), 
+      y = number_of_rides)) +
+  geom_col() + 
+  geom_text(
+    aes(label = percentage),
+    hjust = -0.1, size = 3) +
+  labs(title = "Top 10 Starting Stations, by Number of Rides",
+       subtitle = "with % of Total Rides, by member_casual",
+       x = "start_station_name") +
+  ylim(0, 60000) +
+  facet_grid(rows = vars(member_casual), scales = "free") + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) + 
+  coord_flip() +
+  theme_minimal()
+```
+
+From the above, we observe that:
+
+- "Streeter Dr & Grand Ave" is the most popular start_station for Casual riders at 2.63% of total rides by Casual riders in the last 12-months
+- It would seem that the popular start_station among Casual riders are near recreational areas (Streeter Dr & Grand Ave is near a popular pier in Chicago, Millennium Park, Shedd Aquarium, etc.); this indicates that if we were better able to discern Casual riders by residents vs. tourists, we will be able to have a more targeted marketing approach
+- "Clark St & Elm St" is the most popular start_station for Member riders at 0.92% of total rides by Member riders in the last 12-months
+- There is no significant concentration in the top-10 start_station for Member riders, with max. of 0.92% and min. of 0.68% of total rides in the last 12-months
+
+We can conduct the same analysis for end_station:
+
+```{r end_station}
+df_end <- df %>%
+  filter(!is.na(end_station_name)) %>%  #we filter out missing values
+  group_by(member_casual, end_station_name) %>%
+  summarise(median_duration_mins = median(ride_length_mins),
+            number_of_rides = n(), .groups = "drop_last") %>%
+  mutate(percentage = paste0(round(number_of_rides / sum(number_of_rides) * 100, 2),"%")) %>%
+  arrange(member_casual, desc(number_of_rides)) %>%
+  slice_max(order_by = number_of_rides, n = 10)
+df_end
+```
+```{r end_bar}
+df_end %>%
+  ggplot(
+    aes(
+      x = reorder(end_station_name, number_of_rides), 
+      y = number_of_rides)) +
+  geom_col() + 
+  geom_text(
+    aes(label = percentage),
+    hjust = -0.1, size = 3) +
+  labs(title = "Top 10 Ending Stations, by Number of Rides",
+       subtitle = "with % of Total Rides, by member_casual",
+       x = "end_station_name") +
+  ylim(0, 65000) +
+  facet_grid(rows = vars(member_casual), scales = "free") + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) + 
+  coord_flip() +
+  theme_minimal()
+```
+
+From the above, we observe that:
+
+- "Streeter Dr & Grand Ave" is also the most popular end_station for Casual riders at 2.75% of total rides by Casual riders in the last 12-months
+- Similarly, popular end_stations for Casual riders are also near recreational areas
+- "Clark St & Elm St" is also the most popular end_station for Member riders at 0.94% of total rides by Member riders in the last 12-months
+- Similarly, there is no significant concentration in the top-10 end_station for Member riders, with max. of 0.94% and min. of 0.66% of total rides in the last 12-months
+
+To further build upon the analysis, we can try to identify popular routes among riders. In the code below, we create a new column: route, that captures the start_ and end_station_name.
+
+```{r route}
+df$route <- paste(df$start_station_name, df$end_station_name, sep = "-")
+df_route <- df %>%
+  #filter out missing start_ and end_station_name
+  filter((!is.na(start_station_name)) & (!is.na(end_station_name))) %>% 
+  group_by(member_casual, route) %>%
+  summarise(median_duration_mins = median(ride_length_mins),
+            number_of_rides = n(), .groups = "drop_last") %>%
+  mutate(percentage = paste0(round(number_of_rides / sum(number_of_rides) * 100, 2),"%")) %>%
+  arrange(desc(number_of_rides)) %>%
+  slice_max(order_by = number_of_rides, n = 10)
+df_route
+```
+```{r route_bar}
+df_route %>%
+  ggplot(aes(x = reorder(route, number_of_rides), y = number_of_rides)) +
+  geom_col() + 
+  geom_text(
+    aes(label = percentage),
+    hjust = -0.1, size = 3) +
+  labs(title = "Top 10 Routes",
+       subtitle = "with % of Total Rides",
+       x = "route") +
+  ylim(0, 12000) +
+  facet_grid(rows = vars(member_casual), scales = "free") + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) + 
+  coord_flip() +
+  theme_minimal()
+```
+
+From the above, we observe that:
+
+- "Streeter Dr & Grand Ave" (return-trip) is the most popular route for Casual riders at 0.48% of total rides by Casual riders in the last 12-months
+- Similarly, popular routes for Casual riders are near recreational areas
+- "Ellis Ave & 60th St - Ellis Ave & 55th St" is the  most popular rote for Member riders at 0.08%, and vice-versa at 0.07% of total rides by Member riders in the last 12-months. Upon further investigation, this area contains many educational facilities (University of Chicago) and healthcare facilities (UCMC)
+- The same applies to the 3rd, 4th and 5th most popular route ("MLK Jr Dr & 29th St, State St & 33rd St and Calumet Ave & 33rd St) that is centered by Illinois Institute of Technology
+
+***
+
+### Key Insights
+As a refresher, the 3 analytical objectives we laid out at the beginning are:
+
+1. How do annual members and casual riders use Cyclistic bikes differently?
+2. Why would casual riders buy Cyclistic annual memberships?
+3. How can Cyclistic use digital media to influence casual riders to become members?
+
+From the Exploratory Data Analysis (EDA) above, we identified the following insights:
+
+#### Rider Type:
+
+- Majority of the rides in the last 12-months are attributed to Members (55%) vs. Casuals (45%)
+- Members tend to have a shorter ride length (median = 10.42 mins) vs. Casuals 17.42mins
+
+#### Type of Bike:
+
+- Both Members (51%) and Casuals (42%) have a preference for classic_bikes, followed by electric_bikes (31%, 34% respectively) and finally docked_bikes (18%, 24% respectively), and the distribution of rider type and rideable_type are dependent (as confirmed by a chi2 test with 95% significance value)
+
+#### Day of Week:
+
+- Ridership for Members are consistent across the week, while ridership is higher for Casuals during the weekends
+- Ride lengths are longer during the weekends for both Members (avg. median of 11.7 mins vs. weekdays 10.0 mins) and Casuals (19.8 mins vs. 16.0 mins), regardless of rideable_type
+
+#### Popular Stations & Routes:
+
+- Popular stations/routes are centered around educational facilities (University of Illinois Chicago, Illinois Institute of Technology) while they are centered around recreational areas (mostly in Chicago's downtown, "The Loop") for Casuals _(see map below)_
+
+![](images/Chicago Map.JPG)
+
+Source: Google Maps
+
+### Recommendation(s)
+Based on the above, my recommendation(s) are as follows:
+
+1. **Focus marketing efforts on college students in the area:** consider offering a "student discount" or a flexible pricing plan for students given that the current annual membership requires USD 108 upfront (USD 9/month vs. Single Ride USD 3.30/trip and Day Pass USD 15/day) - allowing a monthly payment scheme might be more palatable for students
+
+2. **Shorten the lock-in for membership:** my assumption is that many riders are turned-off by the upfront USD 108 payment for a one-year membership (the company can confirm this by running a survey with its users). The company can trial a shorter membership period (3-months/6-months) and we can conduct an A/B testing for the promotion efforts to guage the efficacy
+
+3. **Send riders a summary of their activities at the end of every month:** the bar to sign-up for a membership is not very high - at USD 3.30/trip vs. USD 9/month, a Casual rider only needs to take 3 rides in a month for it to make economic sense. A monthly summary might prompt frequent Casual riders to consider a subscription if they are able to visualize how much they could have saved in that month
+
+4. **Shorten the duration on the Day Pass:** there is some buffer on the current 30 mins available with the Day Pass (USD 0.15/min thereafter) - median ride length for Casuals is 17.42 mins and for Members is 10.42 mins. Reducing the cap to 25 mins should not have a significant negative impact, although it depends on how riders view the move. This will motivate Casuals to consider a membership to avoid "overcharges" and the stress of monitoring their ride time
+
+***
+
+Source for pricing: https://www.divvybikes.com/
+
+***
+
+### Area(s) for Improvement
+
+- As mentioned earlier, **having information on whether a Casual rider is a resident or tourist** (assuming no tourists are Member riders) can provide deeper insights into the behaviors of Casual resident riders for a more targeted marketing program to convert them to Member riders. For example, we can identify hot-spots for resident Casual riders and determine their average/median ride length. This information could influence targeted promotions, pricing plans and advertising efforts
+
+- Also mentioned earlier, due to the high cardinality of start_ and end_station_name (>750 unique values), aggregating the information should be considered to make the analysis more meaningful
